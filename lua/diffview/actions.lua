@@ -116,7 +116,7 @@ M.compat = {}
 ---suppress entries that would be no-ops in the current view. Weak keys let
 ---closures returned by action factories be collected once no keymap references
 ---them anymore.
----@alias diffview.ActionTag "merge_only"
+---@alias diffview.ActionTag "merge_only" | "working_tree_only"
 ---@type table<function, diffview.ActionTag>
 local action_meta = setmetatable({}, { __mode = "k" })
 
@@ -149,6 +149,20 @@ function M._is_applicable(fn, view)
   if t == "merge_only" then
     -- `merge_ctx` is a `DiffView` field; on other views the access is nil-safe.
     return view ~= nil and (view --[[@as DiffView]]).merge_ctx ~= nil
+  end
+  if t == "working_tree_only" then
+    -- Index-vs-worktree actions (staging, etc.) are only meaningful when the
+    -- diff compares STAGE against LOCAL. `left`/`right` exist on `DiffView`
+    -- and `FileHistoryView`; in the latter, `left.type` is `COMMIT`, so the
+    -- predicate correctly evaluates to false there.
+    if view == nil then
+      return false
+    end
+    local v = view --[[@as DiffView]]
+    return v.left ~= nil
+      and v.right ~= nil
+      and v.left.type == RevType.STAGE
+      and v.right.type == RevType.LOCAL
   end
   return true
 end
@@ -1190,9 +1204,21 @@ local action_names = {
   "unstage_all",
 }
 
+---Applicability tags for emit-stub actions. Listed here (rather than at each
+---stub site) because the stubs are generated in the loop below.
+---@type table<string, diffview.ActionTag>
+local action_tags = {
+  toggle_stage_entry = "working_tree_only",
+  stage_all = "working_tree_only",
+  unstage_all = "working_tree_only",
+}
+
 for _, name in ipairs(action_names) do
   M[name] = function()
     require("diffview").emit(name)
+  end
+  if action_tags[name] then
+    tag(M[name], action_tags[name])
   end
 end
 
